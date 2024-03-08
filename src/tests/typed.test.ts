@@ -78,6 +78,31 @@ describe('typed module', () => {
     })
   })
 
+  describe('isPrimitive function', () => {
+    test('returns true for all the primitives', () => {
+      const arr = [
+        1.1,
+        'How you doin?',
+        false,
+        Symbol('key'),
+        BigInt('1'),
+        undefined,
+        null
+      ]
+
+      for (const elm of arr) {
+        assert.isTrue(_.isPrimitive(elm))
+      }
+    }),
+      test('returns false for non-primitives', () => {
+        const arr = [new Date(), Number, {}, Object({}), () => 0, [1, 2]]
+
+        for (const elm of arr) {
+          assert.isFalse(_.isPrimitive(elm))
+        }
+      })
+  })
+
   describe('isFunction function', () => {
     test('returns false for null', () => {
       const result = _.isFunction(null)
@@ -321,6 +346,26 @@ describe('typed module', () => {
       assert.isFalse(_.isDate(() => {}))
       assert.isFalse(_.isDate(Symbol('')))
       assert.isFalse(_.isDate(Symbol('hello')))
+    })
+  })
+
+  describe('isPromise function', () => {
+    test('return true for Promise values', () => {
+      assert.isTrue(_.isPromise(new Promise(res => res(0))))
+      assert.isTrue(_.isPromise(new Promise(res => res(''))))
+      assert.isTrue(_.isPromise((async () => {})()))
+    })
+    test('return false for non-Date values', () => {
+      assert.isFalse(_.isPromise(22))
+      assert.isFalse(_.isPromise({ name: 'x' }))
+      assert.isFalse(_.isPromise('abc'))
+      assert.isFalse(_.isPromise(String('abc')))
+      assert.isFalse(_.isPromise([1, 2, 3]))
+      assert.isFalse(_.isPromise(function work() {}))
+      assert.isFalse(_.isPromise(() => {}))
+      assert.isFalse(_.isPromise(Symbol('')))
+      assert.isFalse(_.isPromise(Symbol('hello')))
+      assert.isFalse(_.isPromise({ then: 2 }))
     })
   })
 

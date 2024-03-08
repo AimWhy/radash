@@ -1,3 +1,5 @@
+import { isArray, isFunction } from './typed'
+
 /**
  * Sorts an array of items into groups. The return value is a map where the keys are
  * the group ids the given getGroupId function produced and the value is an array of
@@ -6,12 +8,73 @@
 export const group = <T, Key extends string | number | symbol>(
   array: readonly T[],
   getGroupId: (item: T) => Key
-) => {
+): Partial<Record<Key, T[]>> => {
   return array.reduce((acc, item) => {
     const groupId = getGroupId(item)
-    const groupList = acc[groupId] ?? []
-    return { ...acc, [groupId]: [...groupList, item] }
+    if (!acc[groupId]) acc[groupId] = []
+    acc[groupId].push(item)
+    return acc
   }, {} as Record<Key, T[]>)
+}
+
+/**
+ * Creates an array of grouped elements, the first of which contains the
+ * first elements of the given arrays, the second of which contains the
+ * second elements of the given arrays, and so on.
+ *
+ * Ex. const zipped = zip(['a', 'b'], [1, 2], [true, false]) // [['a', 1, true], ['b', 2, false]]
+ */
+export function zip<T1, T2, T3, T4, T5>(
+  array1: T1[],
+  array2: T2[],
+  array3: T3[],
+  array4: T4[],
+  array5: T5[]
+): [T1, T2, T3, T4, T5][]
+export function zip<T1, T2, T3, T4>(
+  array1: T1[],
+  array2: T2[],
+  array3: T3[],
+  array4: T4[]
+): [T1, T2, T3, T4][]
+export function zip<T1, T2, T3>(
+  array1: T1[],
+  array2: T2[],
+  array3: T3[]
+): [T1, T2, T3][]
+export function zip<T1, T2>(array1: T1[], array2: T2[]): [T1, T2][]
+export function zip<T>(...arrays: T[][]): T[][] {
+  if (!arrays || !arrays.length) return []
+  return new Array(Math.max(...arrays.map(({ length }) => length)))
+    .fill([])
+    .map((_, idx) => arrays.map(array => array[idx]))
+}
+
+/**
+ * Creates an object mapping the specified keys to their corresponding values
+ *
+ * Ex. const zipped = zipToObject(['a', 'b'], [1, 2]) // { a: 1, b: 2 }
+ * Ex. const zipped = zipToObject(['a', 'b'], (k, i) => k + i) // { a: 'a0', b: 'b1' }
+ * Ex. const zipped = zipToObject(['a', 'b'], 1) // { a: 1, b: 1 }
+ */
+export function zipToObject<K extends string | number | symbol, V>(
+  keys: K[],
+  values: V | ((key: K, idx: number) => V) | V[]
+): Record<K, V> {
+  if (!keys || !keys.length) {
+    return {} as Record<K, V>
+  }
+
+  const getValue = isFunction(values)
+    ? values
+    : isArray(values)
+    ? (_k: K, i: number) => values[i]
+    : (_k: K, _i: number) => values
+
+  return keys.reduce((acc, key, idx) => {
+    acc[key] = getValue(key, idx)
+    return acc
+  }, {} as Record<K, V>)
 }
 
 /**
@@ -33,14 +96,16 @@ export const boil = <T>(
  * Sum all numbers in an array. Optionally provide a function
  * to convert objects in the array to number values.
  */
-export const sum = <T extends number | object>(
+export function sum<T extends number>(array: readonly T[]): number
+export function sum<T extends object>(
   array: readonly T[],
+  fn: (item: T) => number
+): number
+export function sum<T extends object | number>(
+  array: readonly any[],
   fn?: (item: T) => number
-) => {
-  return (array || []).reduce(
-    (acc, item) => acc + (fn ? fn(item) : (item as number)),
-    0
-  )
+): number {
+  return (array || []).reduce((acc, item) => acc + (fn ? fn(item) : item), 0)
 }
 
 /**
@@ -98,12 +163,11 @@ export const counting = <T, TId extends string | number | symbol>(
   list: readonly T[],
   identity: (item: T) => TId
 ): Record<TId, number> => {
+  if (!list) return {} as Record<TId, number>
   return list.reduce((acc, item) => {
     const id = identity(item)
-    return {
-      ...acc,
-      [id]: (acc[id] ?? 0) + 1
-    }
+    acc[id] = (acc[id] ?? 0) + 1
+    return acc
   }, {} as Record<TId, number>)
 }
 
@@ -118,7 +182,7 @@ export const replace = <T>(
   match: (item: T, idx: number) => boolean
 ): T[] => {
   if (!list) return []
-  if (!newItem) return [...list]
+  if (newItem === undefined) return [...list]
   for (let idx = 0; idx < list.length; idx++) {
     const item = list[idx]
     if (match(item, idx)) {
@@ -141,55 +205,71 @@ export const objectify = <T, Key extends string | number | symbol, Value = T>(
   getKey: (item: T) => Key,
   getValue: (item: T) => Value = item => item as unknown as Value
 ): Record<Key, Value> => {
-  return array.reduce(
-    (acc, item) => ({
-      ...acc,
-      [getKey(item)]: getValue(item)
-    }),
-    {} as Record<Key, Value>
-  )
+  return array.reduce((acc, item) => {
+    acc[getKey(item)] = getValue(item)
+    return acc
+  }, {} as Record<Key, Value>)
 }
 
 /**
  * Select performs a filter and a mapper inside of a reduce,
  * only iterating the list one time.
  *
- * Ex. select([1, 2, 3, 4], x => x*x, x > 2) == [9, 16]
+ * @example
+ * select([1, 2, 3, 4], x => x*x, x > 2) == [9, 16]
  */
 export const select = <T, K>(
   array: readonly T[],
-  mapper: (item: T) => K,
-  condition: (item: T) => boolean
+  mapper: (item: T, index: number) => K,
+  condition: (item: T, index: number) => boolean
 ) => {
-  return array.reduce((acc, item) => {
-    if (!condition(item)) return acc
-    return [...acc, mapper(item)]
+  if (!array) return []
+  return array.reduce((acc, item, index) => {
+    if (!condition(item, index)) return acc
+    acc.push(mapper(item, index))
+    return acc
   }, [] as K[])
 }
 
 /**
  * Max gets the greatest value from a list
  *
- * Ex. max([{ num: 1 }, { num: 2 }], x => x.num) == 2
+ * @example
+ * max([ 2, 3, 5]) == 5
+ * max([{ num: 1 }, { num: 2 }], x => x.num) == { num: 2 }
  */
-export const max = <T extends number | object>(
+export function max(array: readonly [number, ...number[]]): number
+export function max(array: readonly number[]): number | null
+export function max<T>(
+  array: readonly T[],
+  getter: (item: T) => number
+): T | null
+export function max<T>(
   array: readonly T[],
   getter?: (item: T) => number
-) => {
-  const get = getter ? getter : (v: any) => v
+): T | null {
+  const get = getter ?? ((v: any) => v)
   return boil(array, (a, b) => (get(a) > get(b) ? a : b))
 }
 
 /**
  * Min gets the smallest value from a list
  *
- * Ex. max([{ num: 1 }, { num: 2 }], x => x.num) == 1
+ * @example
+ * min([1, 2, 3, 4]) == 1
+ * min([{ num: 1 }, { num: 2 }], x => x.num) == { num: 1 }
  */
-export const min = <T extends number | object>(
+export function min(array: readonly [number, ...number[]]): number
+export function min(array: readonly number[]): number | null
+export function min<T>(
+  array: readonly T[],
+  getter: (item: T) => number
+): T | null
+export function min<T>(
   array: readonly T[],
   getter?: (item: T) => number
-) => {
-  const get = getter ? getter : (v: any) => v
+): T | null {
+  const get = getter ?? ((v: any) => v)
   return boil(array, (a, b) => (get(a) < get(b) ? a : b))
 }
 
@@ -218,7 +298,8 @@ export const unique = <T, K extends string | number | symbol>(
   const valueMap = array.reduce((acc, item) => {
     const key = toKey ? toKey(item) : (item as any as string | number | symbol)
     if (acc[key]) return acc
-    return { ...acc, [key]: item }
+    acc[key] = item
+    return acc
   }, {} as Record<string | number | symbol, T>)
   return Object.values(valueMap)
 }
@@ -227,32 +308,52 @@ export const unique = <T, K extends string | number | symbol>(
  * Creates a generator that will produce an iteration through
  * the range of number as requested.
  *
- * @example for (const i of _.range(3, 3*3, 3)) { console.log(i) }
+ * @example
+ * range(3)                  // yields 0, 1, 2, 3
+ * range(0, 3)               // yields 0, 1, 2, 3
+ * range(0, 3, 'y')          // yields y, y, y, y
+ * range(0, 3, () => 'y')    // yields y, y, y, y
+ * range(0, 3, i => i)       // yields 0, 1, 2, 3
+ * range(0, 3, i => `y${i}`) // yields y0, y1, y2, y3
+ * range(0, 3, obj)          // yields obj, obj, obj, obj
+ * range(0, 6, i => i, 2)    // yields 0, 2, 4, 6
  */
-export function* range(
-  start: number,
-  end: number,
+export function* range<T = number>(
+  startOrLength: number,
+  end?: number,
+  valueOrMapper: T | ((i: number) => T) = i => i as T,
   step: number = 1
-): Generator<number> {
-  for (let i = start; i <= end; i += step) {
-    yield i
-    if (i + step > end) break
+): Generator<T> {
+  const mapper = isFunction(valueOrMapper) ? valueOrMapper : () => valueOrMapper
+  const start = end ? startOrLength : 0
+  const final = end ?? startOrLength
+  for (let i = start; i <= final; i += step) {
+    yield mapper(i)
+    if (i + step > final) break
   }
 }
 
 /**
- * Creates a list with numbers ranging from the
- * start to the end by the given step.
+ * Creates a list of given start, end, value, and
+ * step parameters.
  *
- * @example list(0, 3) // [0, 1, 2, 3]
- * @example list(2, 10, 2) // [2, 4, 6, 8 ,10]
+ * @example
+ * list(3)                  // 0, 1, 2, 3
+ * list(0, 3)               // 0, 1, 2, 3
+ * list(0, 3, 'y')          // y, y, y, y
+ * list(0, 3, () => 'y')    // y, y, y, y
+ * list(0, 3, i => i)       // 0, 1, 2, 3
+ * list(0, 3, i => `y${i}`) // y0, y1, y2, y3
+ * list(0, 3, obj)          // obj, obj, obj, obj
+ * list(0, 6, i => i, 2)    // 0, 2, 4, 6
  */
-export const list = (
-  start: number,
-  end: number,
-  step: number = 1
-): number[] => {
-  return Array.from(range(start, end, step))
+export const list = <T = number>(
+  startOrLength: number,
+  end?: number,
+  valueOrMapper?: T | ((i: number) => T),
+  step?: number
+): T[] => {
+  return Array.from(range(startOrLength, end, valueOrMapper, step))
 }
 
 /**
@@ -261,7 +362,8 @@ export const list = (
  */
 export const flat = <T>(lists: readonly T[][]): T[] => {
   return lists.reduce((acc, list) => {
-    return [...acc, ...list]
+    acc.push(...list)
+    return acc
   }, [])
 }
 
@@ -276,13 +378,10 @@ export const intersects = <T, K extends string | number | symbol>(
 ): boolean => {
   if (!listA || !listB) return false
   const ident = identity ?? ((x: T) => x as unknown as K)
-  const dictB = listB.reduce(
-    (acc, item) => ({
-      ...acc,
-      [ident(item)]: true
-    }),
-    {} as Record<string | number | symbol, boolean>
-  )
+  const dictB = listB.reduce((acc, item) => {
+    acc[ident(item)] = true
+    return acc
+  }, {} as Record<string | number | symbol, boolean>)
   return listA.some(value => dictB[ident(value)])
 }
 
@@ -324,8 +423,9 @@ export const merge = <T>(
   if (!matcher) return root
   return root.reduce((acc, r) => {
     const matched = others.find(o => matcher(r) === matcher(o))
-    if (matched) return [...acc, matched]
-    else return [...acc, r]
+    if (matched) acc.push(matched)
+    else acc.push(r)
+    return acc
   }, [] as T[])
 }
 
@@ -356,11 +456,43 @@ export const replaceOrAppend = <T>(
 }
 
 /**
+ * If the item matching the condition already exists
+ * in the list it will be removed. If it does not it
+ * will be added.
+ */
+export const toggle = <T>(
+  list: readonly T[],
+  item: T,
+  /**
+   * Converts an item of type T item into a value that
+   * can be checked for equality
+   */
+  toKey?: null | ((item: T, idx: number) => number | string | symbol),
+  options?: {
+    strategy?: 'prepend' | 'append'
+  }
+) => {
+  if (!list && !item) return []
+  if (!list) return [item]
+  if (!item) return [...list]
+  const matcher = toKey
+    ? (x: T, idx: number) => toKey(x, idx) === toKey(item, idx)
+    : (x: T) => x === item
+  const existing = list.find(matcher)
+  if (existing) return list.filter((x, idx) => !matcher(x, idx))
+  const strategy = options?.strategy ?? 'append'
+  if (strategy === 'append') return [...list, item]
+  return [item, ...list]
+}
+
+type Falsy = null | undefined | false | '' | 0 | 0n
+
+/**
  * Given a list returns a new list with
  * only truthy values
  */
-export const sift = <T>(list: readonly T[]): NonNullable<T>[] => {
-  return (list?.filter(x => !!x) as NonNullable<T>[]) ?? []
+export const sift = <T>(list: readonly (T | Falsy)[]): T[] => {
+  return (list?.filter(x => !!x) as T[]) ?? []
 }
 
 /**
@@ -397,13 +529,10 @@ export const diff = <T>(
   if (!root?.length && !other?.length) return []
   if (root?.length === undefined) return [...other]
   if (!other?.length) return [...root]
-  const bKeys = other.reduce(
-    (acc, item) => ({
-      ...acc,
-      [identity(item)]: true
-    }),
-    {} as Record<string | number | symbol, boolean>
-  )
+  const bKeys = other.reduce((acc, item) => {
+    acc[identity(item)] = true
+    return acc
+  }, {} as Record<string | number | symbol, boolean>)
   return root.filter(a => !bKeys[identity(a)])
 }
 

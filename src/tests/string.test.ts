@@ -3,10 +3,6 @@ import * as _ from '..'
 
 describe('string module', () => {
   describe('camel function', () => {
-    test('camal alias is available', () => {
-      // NOTE: Remove in next major version
-      assert.isFunction(_.camal)
-    })
     test('returns correctly cased string', () => {
       const result = _.camel('hello world')
       assert.equal(result, 'helloWorld')
@@ -44,6 +40,16 @@ describe('string module', () => {
     test('must handle strings that are dash', () => {
       const result = _.snake('hello-world')
       assert.equal(result, 'hello_world')
+    })
+    test('splits numbers that are next to letters', () => {
+      const result = _.snake('hello-world12_19-bye')
+      assert.equal(result, 'hello_world_12_19_bye')
+    })
+    test('does not split numbers when flag is set to false', () => {
+      const result = _.snake('hello-world12_19-bye', {
+        splitOnNumber: false
+      })
+      assert.equal(result, 'hello_world12_19_bye')
     })
     test('returns single word', () => {
       const result = _.snake('hello')
@@ -143,8 +149,8 @@ describe('string module', () => {
     })
   })
 
-  describe('PascalCase function', () => {
-    test('returns non alphanumerics in PascalCase', () => {
+  describe('pascal function', () => {
+    test('returns non alphanumerics in pascal', () => {
       const result = _.pascal('Exobase Starter_flash AND-go')
       assert.equal(result, 'ExobaseStarterFlashAndGo')
     })
@@ -155,6 +161,43 @@ describe('string module', () => {
     test('returns empty string for empty input', () => {
       const result = _.pascal(null as any)
       assert.equal(result, '')
+    })
+  })
+
+  describe('title function', () => {
+    test('returns input formatted in title case', () => {
+      assert.equal(_.title('hello world'), 'Hello World')
+      assert.equal(_.title('va_va_boom'), 'Va Va Boom')
+      assert.equal(_.title('root-hook   -  ok!'), 'Root Hook Ok!')
+      assert.equal(_.title('queryItems'), 'Query Items')
+      assert.equal(
+        _.title('queryAllItems-in_Database'),
+        'Query All Items In Database'
+      )
+    })
+    test('returns empty string for bad input', () => {
+      assert.equal(_.title(null), '')
+      assert.equal(_.title(undefined), '')
+    })
+  })
+
+  describe('trim function', () => {
+    test('handles bad input', () => {
+      assert.equal(_.trim(null), '')
+      assert.equal(_.trim(undefined), '')
+    })
+    test('returns input string correctly trimmed', () => {
+      assert.equal(_.trim('\n\n\t\nhello\n\t  \n', '\n\t '), 'hello')
+      assert.equal(_.trim('hello', 'x'), 'hello')
+      assert.equal(_.trim(' hello  '), 'hello')
+      assert.equal(_.trim(' __hello__  ', '_'), ' __hello__  ')
+      assert.equal(_.trim('__hello__', '_'), 'hello')
+      assert.equal(_.trim('//repos////', '/'), 'repos')
+      assert.equal(_.trim('/repos/:owner/:repo/', '/'), 'repos/:owner/:repo')
+    })
+
+    test('handles when char to trim is special case in regex', () => {
+      assert.equal(_.trim('_- hello_- ', '_- '), 'hello')
     })
   })
 })

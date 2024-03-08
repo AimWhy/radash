@@ -1,5 +1,6 @@
 import { assert } from 'chai'
 import * as _ from '..'
+import { AggregateError } from '../async'
 
 describe('async module', () => {
   beforeEach(() => jest.useFakeTimers({ advanceTimers: true }))
@@ -18,6 +19,21 @@ describe('async module', () => {
       }
       const result = await _.reduce<number, number>(numbers, asyncSum, 0)
       assert.equal(result, 10)
+    })
+    test('passes correct indexes', async () => {
+      const array = ['a', 'b', 'c', 'd', 'e']
+      const asyncSumIndex = async (
+        a: number[],
+        b: string,
+        i: number
+      ): Promise<number[]> => {
+        return new Promise(res => {
+          a.push(i)
+          res(a)
+        })
+      }
+      const result = await _.reduce<string, number[]>(array, asyncSumIndex, [])
+      assert.deepEqual(result, [0, 1, 2, 3, 4])
     })
   })
 
@@ -211,10 +227,11 @@ describe('async module', () => {
 
   describe('_.try function', () => {
     test('returns error when error is thrown', async () => {
-      const [err, result] = await _.try(async () => {
+      const fn = _.try(async () => {
         throw new Error('not good enough')
-      })()
-      assert.isNull(result)
+      })
+      const [err, result] = await fn()
+      assert.isUndefined(result)
       assert.isNotNull(err)
       assert.equal(err!.message, 'not good enough')
     })
@@ -222,9 +239,26 @@ describe('async module', () => {
       const [err, result] = await _.try(async () => {
         return 'hello'
       })()
-      assert.isNull(err)
+      assert.isUndefined(err)
       assert.isNotNull(result)
       assert.equal(result, 'hello')
+    })
+    test('handles non-async function results', async () => {
+      const [err, result] = _.try(() => {
+        return 'hello'
+      })()
+      assert.isUndefined(err)
+      assert.isNotNull(result)
+      assert.equal(result, 'hello')
+    })
+    test('handles non-async function errors', async () => {
+      const [err, result] = _.try(() => {
+        if (1 < 0) return ''
+        throw new Error('unknown')
+      })()
+      assert.isUndefined(result)
+      assert.isNotNull(err)
+      assert.equal(err!.message, 'unknown')
     })
     test('alias exists', () => {
       assert.isNotNull(_.tryit)
@@ -241,6 +275,50 @@ describe('async module', () => {
     })
   })
 
+  describe('AggregateError error', () => {
+    const fakeWork = (name?: string) => {
+      const fakeJob = () => {
+        const fakeTask = () => {
+          const fakeMicrotask = () => {
+            const err = new Error()
+            err.name = name ?? 'MicrotaskError'
+            throw err
+          }
+          return fakeMicrotask()
+        }
+        return fakeTask()
+      }
+      return fakeJob()
+    }
+    test('uses stack from the first given error', () => {
+      const errors: Error[] = []
+      try {
+        fakeWork()
+      } catch (e) {
+        errors.push(e as Error)
+      }
+      const aggregate = new AggregateError(errors)
+      assert.include(aggregate.stack, 'at fakeMicrotask')
+      assert.include(aggregate.message, 'with 1')
+    })
+    test('uses stack from first error with a stack', () => {
+      const errors: Error[] = [{} as Error]
+      try {
+        fakeWork()
+      } catch (e) {
+        errors.push(e as Error)
+      }
+      const aggregate = new AggregateError(errors)
+      assert.equal(aggregate.name, 'AggregateError(MicrotaskError...)')
+      assert.include(aggregate.stack, 'at fakeMicrotask')
+      assert.include(aggregate.message, 'with 2')
+    })
+    test('does not fail if no errors given', () => {
+      new AggregateError([])
+      new AggregateError(undefined as unknown as Error[])
+    })
+  })
+
   describe('_.parallel function', () => {
     test('returns all results from all functions', async () => {
       const [errors, results] = await _.try(async () => {
@@ -249,7 +327,7 @@ describe('async module', () => {
           return `hi_${num}`
         })
       })()
-      assert.isNull(errors)
+      assert.isUndefined(errors)
       assert.deepEqual(results, ['hi_1', 'hi_2', 'hi_3'])
     })
     test('throws erros as array of all errors', async () => {
@@ -260,8 +338,8 @@ describe('async module', () => {
           return `hi_${num}`
         })
       })()
-      const err = error as _.AggregateError
-      assert.isNull(results)
+      const err = error as AggregateError
+      assert.isUndefined(results)
       assert.equal(err.errors.length, 1)
       assert.equal(err.errors[0].message, 'number is 2')
     })
@@ -383,6 +461,118 @@ describe('async module', () => {
       // The performance typically comes in 1
       // or 2 milliseconds after.
       assert.isAtLeast(diff, backoffs)
+    })
+  })
+
+  describe('_.guard', () => {
+    it('returns result of given async function', async () => {
+      const result = await _.guard(async () => {
+        return 'hello'
+      })
+      assert.equal(result, 'hello')
+    })
+    it('returns result of given sync function', async () => {
+      const result = _.guard(() => {
+        return 'hello'
+      })
+      assert.equal(result, 'hello')
+    })
+    it('returns error if given async function throws', async () => {
+      const result =
+        (await _.guard(async () => {
+          throw new Error('error')
+        })) ?? 'good-bye'
+      assert.equal(result, 'good-bye')
+    })
+    it('returns error if given sync function throws', async () => {
+      const alwaysThrow = () => {
+        if (1 > 0) throw new Error('error')
+        return undefined
+      }
+      const result = _.guard(alwaysThrow) ?? 'good-bye'
+      assert.equal(result, 'good-bye')
+    })
+    it('throws error if shouldGuard returns false', async () => {
+      const makeFetchUser = (id: number) => {
+        return async () => {
+          if (id === 1) return 'user1'
+          if (id === 2) throw new Error('user not found')
+          throw new Error('unknown error')
+        }
+      }
+      const isUserNotFoundErr = (err: any) => err.message === 'user not found'
+      const fetchUser = async (id: number) =>
+        (await _.guard(makeFetchUser(id), isUserNotFoundErr)) ?? 'default-user'
+
+      const user1 = await fetchUser(1)
+      assert.equal(user1, 'user1')
+
+      const user2 = await fetchUser(2)
+      assert.equal(user2, 'default-user')
+
+      try {
+        await fetchUser(3)
+        assert.fail()
+      } catch (err: any) {
+        assert.equal(err.message, 'unknown error')
+      }
+    })
+  })
+
+  describe('_.all', () => {
+    const promise = {
+      resolve: <T>(value: T) => new Promise<T>(res => res(value)),
+      reject: (err: any) => new Promise((res, rej) => rej(err))
+    }
+    it('returns array with values in correct order when given array', async () => {
+      const result = await _.all([
+        promise.resolve(22),
+        promise.resolve('hello'),
+        promise.resolve({ name: 'ray' })
+      ])
+      assert.deepEqual(result, [22, 'hello', { name: 'ray' }])
+    })
+    it('returns object with values in correct keys when given object', async () => {
+      const result = await _.all({
+        num: promise.resolve(22),
+        str: promise.resolve('hello'),
+        obj: promise.resolve({ name: 'ray' })
+      })
+      assert.deepEqual(result, {
+        num: 22,
+        str: 'hello',
+        obj: { name: 'ray' }
+      })
+    })
+    it('throws aggregate error when a single promise fails (in object mode)', async () => {
+      try {
+        await _.all({
+          num: promise.resolve(22),
+          str: promise.resolve('hello'),
+          err: promise.reject(new Error('broken'))
+        })
+      } catch (e: any) {
+        const err = e as AggregateError
+        assert.equal(err.errors.length, 1)
+        assert.equal(err.errors[0].message, 'broken')
+        return
+      }
+      assert.fail('Expected error to be thrown but it was not')
+    })
+    it('throws aggregate error when a single promise fails (in array mode)', async () => {
+      try {
+        await _.all([
+          promise.resolve(22),
+          promise.resolve('hello'),
+          promise.reject(new Error('broken'))
+        ])
+      } catch (e: any) {
+        const err = e as AggregateError
+        assert.equal(err.errors.length, 1)
+        assert.equal(err.errors[0].message, 'broken')
+        return
+      }
+      assert.fail('Expected error to be thrown but it was not')
     })
   })
 })

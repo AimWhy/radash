@@ -1,4 +1,5 @@
 import { fork, list, range, sort } from './array'
+import { isArray, isPromise } from './typed'
 
 /**
  * An async reduce function. Works like the
@@ -7,7 +8,7 @@ import { fork, list, range, sort } from './array'
  */
 export const reduce = async <T, K>(
   array: readonly T[],
-  asyncReducer: (acc: K, item: T) => Promise<K>,
+  asyncReducer: (acc: K, item: T, index: number) => Promise<K>,
   initValue?: K
 ): Promise<K> => {
   const initProvided = initValue !== undefined
@@ -16,8 +17,8 @@ export const reduce = async <T, K>(
   }
   const iter = initProvided ? array : array.slice(1)
   let value: any = initProvided ? initValue : array[0]
-  for (const item of iter) {
-    value = await asyncReducer(value, item)
+  for (const [i, item] of iter.entries()) {
+    value = await asyncReducer(value, item, i)
   }
   return value
 }
@@ -72,7 +73,7 @@ export const defer = async <TResponse>(
   const [err, response] = await tryit(func)(register)
   for (const { fn, rethrow } of callbacks) {
     const [rethrown] = await tryit(fn)(err)
-    if (rethrow) throw rethrown
+    if (rethrown && rethrow) throw rethrown
   }
   if (err) throw err
   return response
@@ -86,14 +87,18 @@ type WorkItemResult<K> = {
 
 /**
  * Support for the built-in AggregateError
- * is still new. Node <= 14 doesn't have it
+ * is still new. Node < 15 doesn't have it
  * so patching here.
  * https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AggregateError#browser_compatibility
  */
 export class AggregateError extends Error {
   errors: Error[]
-  constructor(errors: Error[]) {
+  constructor(errors: Error[] = []) {
     super()
+    const name = errors.find(e => e.name)?.name ?? ''
+    this.name = `AggregateError(${name}...)`
+    this.message = `AggregateError with ${errors.length} errors`
+    this.stack = errors.find(e => e.stack)?.stack ?? this.stack
     this.errors = errors
   }
 }
@@ -141,6 +146,78 @@ export const parallel = async <T, K>(
   return results.map(r => r.result)
 }
 
+type PromiseValues<T extends Promise<any>[]> = {
+  [K in keyof T]: T[K] extends Promise<infer U> ? U : never
+}
+
+/**
+ * Functionally similar to Promise.all or Promise.allSettled. If any
+ * errors are thrown, all errors are gathered and thrown in an
+ * AggregateError.
+ *
+ * @example
+ * const [user] = await all([
+ *   api.users.create(...),
+ *   s3.buckets.create(...),
+ *   slack.customerSuccessChannel.sendMessage(...)
+ * ])
+ */
+export async function all<T extends [Promise<any>, ...Promise<any>[]]>(
+  promises: T
+): Promise<PromiseValues<T>>
+export async function all<T extends Promise<any>[]>(
+  promises: T
+): Promise<PromiseValues<T>>
+/**
+ * Functionally similar to Promise.all or Promise.allSettled. If any
+ * errors are thrown, all errors are gathered and thrown in an
+ * AggregateError.
+ *
+ * @example
+ * const { user } = await all({
+ *   user: api.users.create(...),
+ *   bucket: s3.buckets.create(...),
+ *   message: slack.customerSuccessChannel.sendMessage(...)
+ * })
+ */
+export async function all<T extends Record<string, Promise<any>>>(
+  promises: T
+): Promise<{ [K in keyof T]: Awaited<T[K]> }>
+export async function all<
+  T extends Record<string, Promise<any>> | Promise<any>[]
+>(promises: T) {
+  const entries = isArray(promises)
+    ? promises.map(p => [null, p] as [null, Promise<any>])
+    : Object.entries(promises)
+
+  const results = await Promise.all(
+    entries.map(([key, value]) =>
+      value
+        .then(result => ({ result, exc: null, key }))
+        .catch(exc => ({ result: null, exc, key }))
+    )
+  )
+
+  const exceptions = results.filter(r => r.exc)
+  if (exceptions.length > 0) {
+    throw new AggregateError(exceptions.map(e => e.exc))
+  }
+
+  if (isArray(promises)) {
+    return results.map(r => r.result) as T extends Promise<any>[]
+      ? PromiseValues<T>
+      : unknown
+  }
+
+  return results.reduce(
+    (acc, item) => ({
+      ...acc,
+      [item.key!]: item.result
+    }),
+    {} as { [K in keyof T]: Awaited<T[K]> }
+  )
+}
+
 /**
  * Retries the given function the specified number
  * of times.
@@ -180,26 +257,61 @@ export const sleep = (milliseconds: number) => {
   return new Promise(res => setTimeout(res, milliseconds))
 }
 
-type ArgumentsType<T> = T extends (...args: infer U) => any ? U : never
-type UnwrapPromisify<T> = T extends Promise<infer U> ? U : T
-
 /**
  * A helper to try an async function without forking
  * the control flow. Returns an error first callback _like_
  * array response as [Error, result]
  */
-export const tryit = <TFunction extends (...args: any) => any>(
-  func: TFunction
+export const tryit = <Args extends any[], Return>(
+  func: (...args: Args) => Return
 ) => {
-  return async (
-    ...args: ArgumentsType<TFunction>
-  ): Promise<
-    [Error, null] | [null, UnwrapPromisify<ReturnType<TFunction>>]
-  > => {
+  return (
+    ...args: Args
+  ): Return extends Promise<any>
+    ? Promise<[Error, undefined] | [undefined, Awaited<Return>]>
+    : [Error, undefined] | [undefined, Return] => {
     try {
-      return [null, await func(...(args as any))]
+      const result = func(...args)
+      if (isPromise(result)) {
+        return result
+          .then(value => [undefined, value])
+          .catch(err => [err, undefined]) as Return extends Promise<any>
+          ? Promise<[Error, undefined] | [undefined, Awaited<Return>]>
+          : [Error, undefined] | [undefined, Return]
+      }
+      return [undefined, result] as Return extends Promise<any>
+        ? Promise<[Error, undefined] | [undefined, Awaited<Return>]>
+        : [Error, undefined] | [undefined, Return]
     } catch (err) {
-      return [err as any, null]
+      return [err as any, undefined] as Return extends Promise<any>
+        ? Promise<[Error, undefined] | [undefined, Awaited<Return>]>
+        : [Error, undefined] | [undefined, Return]
     }
+  }
+}
+
+/**
+ * A helper to try an async function that returns undefined
+ * if it fails.
+ *
+ * e.g. const result = await guard(fetchUsers)() ?? [];
+ */
+export const guard = <TFunction extends () => any>(
+  func: TFunction,
+  shouldGuard?: (err: any) => boolean
+): ReturnType<TFunction> extends Promise<any>
+  ? Promise<Awaited<ReturnType<TFunction>> | undefined>
+  : ReturnType<TFunction> | undefined => {
+  const _guard = (err: any) => {
+    if (shouldGuard && !shouldGuard(err)) throw err
+    return undefined as any
+  }
+  const isPromise = (result: any): result is Promise<any> =>
+    result instanceof Promise
+  try {
+    const result = func()
+    return isPromise(result) ? result.catch(_guard) : result
+  } catch (err) {
+    return _guard(err)
   }
 }

@@ -14,10 +14,10 @@ describe('array module', () => {
         { group: 'c', word: 'ok' }
       ]
       const groups = _.group(list, x => x.group)
-      assert.equal(groups.a.length, 2)
-      assert.equal(groups.b.length, 2)
-      assert.equal(groups.c.length, 1)
-      assert.equal(groups.c[0].word, 'ok')
+      assert.equal(groups.a?.length, 2)
+      assert.equal(groups.b?.length, 2)
+      assert.equal(groups.c?.length, 1)
+      assert.equal(groups.c?.[0].word, 'ok')
     })
   })
 
@@ -48,6 +48,45 @@ describe('array module', () => {
     })
   })
 
+  describe('zip function', () => {
+    test('zips an array correctly', () => {
+      const result = _.zip(['a', 'b'], [1, 2], [true, false])
+      assert.deepEqual(result, [
+        ['a', 1, true],
+        ['b', 2, false]
+      ])
+    })
+
+    test('returns an empty array if nothing is passed', () => {
+      // @ts-ignore
+      const result = _.zip()
+      assert.deepEqual(result, [])
+    })
+  })
+
+  describe('zipToObject function', () => {
+    test('zips to an object correctly', () => {
+      const result = _.zipToObject(['a', 'b'], [1, 2])
+      assert.deepEqual(result, { a: 1, b: 2 })
+    })
+
+    test('zips to an object with custom map function', () => {
+      const result = _.zipToObject(['a', 'b'], (k, i) => k + i)
+      assert.deepEqual(result, { a: 'a0', b: 'b1' })
+    })
+
+    test('zips to an object with only one value', () => {
+      const result = _.zipToObject(['a', 'b'], 1)
+      assert.deepEqual(result, { a: 1, b: 1 })
+    })
+
+    test('returns an empty object if bad parameters are passed', () => {
+      // @ts-ignore
+      const result = _.zipToObject()
+      assert.deepEqual(result, {})
+    })
+  })
+
   describe('sum function', () => {
     test('adds list of number correctly', () => {
       const list = [5, 5, 10, 2]
@@ -60,7 +99,7 @@ describe('array module', () => {
       assert.equal(result, 22)
     })
     test('gracefully handles null input list', () => {
-      const result = _.sum(null as unknown as readonly (number | object)[])
+      const result = _.sum(null as unknown as readonly number[])
       assert.equal(result, 0)
     })
   })
@@ -137,9 +176,13 @@ describe('array module', () => {
       )
       assert.deepEqual(result, [])
     })
-    test('returns the list for a null new item', () => {
-      const result = _.replace(['a'], null, () => false)
+    test('returns the list for an undefined new item', () => {
+      const result = _.replace(['a'], undefined, () => true)
       assert.deepEqual(result, ['a'])
+    })
+    test('returns replaced item when value is null', () => {
+      const result = _.replace(['a'], null, i => i === 'a')
+      assert.deepEqual(result, [null])
     })
     test('returns replaced item by index', () => {
       const result = _.replace(
@@ -211,6 +254,24 @@ describe('array module', () => {
   })
 
   describe('select function', () => {
+    test('does not fail on bad input', () => {
+      assert.deepEqual(
+        _.select(
+          null as unknown as any[],
+          x => x,
+          x => x
+        ),
+        []
+      )
+      assert.deepEqual(
+        _.select(
+          undefined as unknown as any[],
+          x => x,
+          x => x
+        ),
+        []
+      )
+    })
     test('returns mapped and filtered values', () => {
       const list = [
         { group: 'a', word: 'hello' },
@@ -234,6 +295,15 @@ describe('array module', () => {
         x => x.group === 'a'
       )
       assert.deepEqual(result, [])
+    })
+    test('works with index', () => {
+      const letters = ['a', 'b', 'c', 'd']
+      const result = _.select(
+        letters,
+        (l, idx) => `${l}${idx}`,
+        (l, idx) => idx > 1
+      )
+      assert.deepEqual(result, ['c2', 'd3'])
     })
   })
 
@@ -323,33 +393,62 @@ describe('array module', () => {
   })
 
   describe('range function', () => {
-    test('creates correct list', () => {
-      let items: number[] = []
-      for (const item of _.range(0, 4)) items.push(item)
-      assert.deepEqual(items, [0, 1, 2, 3, 4])
-    })
-    test('creates correct list with step', () => {
-      let items: number[] = []
-      for (const item of _.range(0, 10, 2)) items.push(item)
-      assert.deepEqual(items, [0, 2, 4, 6, 8, 10])
+    const obj = { name: 'radash' }
+    const toList = <T>(gen: Generator<T>): T[] => {
+      let items: T[] = []
+      for (const item of gen) items.push(item)
+      return items
+    }
+
+    test('yields expected values', () => {
+      assert.deepEqual(toList(_.range(0, 4)), [0, 1, 2, 3, 4])
+      assert.deepEqual(toList(_.range(3)), [0, 1, 2, 3])
+      assert.deepEqual(toList(_.range(0, 3)), [0, 1, 2, 3])
+      assert.deepEqual(toList(_.range(0, 3, 'y')), ['y', 'y', 'y', 'y'])
+      assert.deepEqual(toList(_.range(0, 3, () => 'y')), ['y', 'y', 'y', 'y'])
+      assert.deepEqual(toList(_.range(0, 3, i => i)), [0, 1, 2, 3])
+      assert.deepEqual(toList(_.range(0, 3, i => `y${i}`)), [
+        'y0',
+        'y1',
+        'y2',
+        'y3'
+      ])
+      assert.deepEqual(toList(_.range(0, 3, obj)), [obj, obj, obj, obj])
+      assert.deepEqual(toList(_.range(0, 6, i => i, 2)), [0, 2, 4, 6])
     })
   })
 
   describe('list function', () => {
+    const obj = { name: 'radash' }
     test('creates correct list', () => {
-      const result = _.list(0, 4)
-      assert.deepEqual(result, [0, 1, 2, 3, 4])
-    })
-    test('creates correct list with step', () => {
-      const result = _.list(3, 12, 3)
-      assert.deepEqual(result, [3, 6, 9, 12])
+      assert.deepEqual(_.list(0, 4), [0, 1, 2, 3, 4])
+      assert.deepEqual(_.list(3), [0, 1, 2, 3])
+      assert.deepEqual(_.list(0, 3), [0, 1, 2, 3])
+      assert.deepEqual(_.list(0, 3, 'y'), ['y', 'y', 'y', 'y'])
+      assert.deepEqual(
+        _.list(0, 3, () => 'y'),
+        ['y', 'y', 'y', 'y']
+      )
+      assert.deepEqual(
+        _.list(0, 3, i => i),
+        [0, 1, 2, 3]
+      )
+      assert.deepEqual(
+        _.list(0, 3, i => `y${i}`),
+        ['y0', 'y1', 'y2', 'y3']
+      )
+      assert.deepEqual(_.list(0, 3, obj), [obj, obj, obj, obj])
+      assert.deepEqual(
+        _.list(0, 6, i => i, 2),
+        [0, 2, 4, 6]
+      )
     })
     test('omits end if step does not land on it', () => {
-      const result = _.list(0, 5, 2)
+      const result = _.list(0, 5, i => i, 2)
       assert.deepEqual(result, [0, 2, 4])
     })
     test('returns start only if step larger than end', () => {
-      const result = _.list(0, 5, 20)
+      const result = _.list(0, 5, i => i, 20)
       assert.deepEqual(result, [0])
     })
   })
@@ -598,6 +697,10 @@ describe('array module', () => {
         Y: 2
       })
     })
+    test('does not error on bad input', () => {
+      _.counting(null as unknown as number[], x => x)
+      _.counting(undefined as unknown as number[], x => x)
+    })
   })
 
   describe('shift function', () => {
@@ -633,6 +736,45 @@ describe('array module', () => {
     test('should return empty array', () => {
       const results = _.shift([], 10)
       assert.deepEqual(results, [])
+    })
+  })
+
+  describe('toggle function', () => {
+    test('should handle null input list', () => {
+      const result = _.toggle(null as unknown as any[], 'a')
+      assert.deepEqual(result, ['a'])
+    })
+    test('should handle null input list and null item', () => {
+      const result = _.toggle(null as unknown as any[], null)
+      assert.deepEqual(result, [])
+    })
+    test('should handle null item', () => {
+      const result = _.toggle(['a'], null)
+      assert.deepEqual(result, ['a'])
+    })
+    test('should add item when it does not exist using default matcher', () => {
+      const result = _.toggle(['a'], 'b')
+      assert.deepEqual(result, ['a', 'b'])
+    })
+    test('should remove item when it does exist using default matcher', () => {
+      const result = _.toggle(['a', 'b'], 'b')
+      assert.deepEqual(result, ['a'])
+    })
+    test('should remove item when it does exist using custom matcher', () => {
+      const result = _.toggle(
+        [{ value: 'a' }, { value: 'b' }],
+        { value: 'b' },
+        v => v.value
+      )
+      assert.deepEqual(result, [{ value: 'a' }])
+    })
+    test('should add item when it does not exist using custom matcher', () => {
+      const result = _.toggle([{ value: 'a' }], { value: 'b' }, v => v.value)
+      assert.deepEqual(result, [{ value: 'a' }, { value: 'b' }])
+    })
+    test('should prepend item when strategy is set', () => {
+      const result = _.toggle(['a'], 'b', null, { strategy: 'prepend' })
+      assert.deepEqual(result, ['b', 'a'])
     })
   })
 })

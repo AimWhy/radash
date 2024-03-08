@@ -2,12 +2,26 @@ export const isSymbol = (value: any): value is symbol => {
   return !!value && value.constructor === Symbol
 }
 
-export const isArray = (value: any): value is unknown[] => {
-  return !!value && value.constructor === Array
-}
+export const isArray = Array.isArray
 
 export const isObject = (value: any): value is object => {
   return !!value && value.constructor === Object
+}
+
+/**
+ * Checks if the given value is primitive.
+ *
+ * Primitive Types: number , string , boolean , symbol, bigint, undefined, null
+ *
+ * @param {*} value value to check
+ * @returns {boolean} result
+ */
+export const isPrimitive = (value: any): boolean => {
+  return (
+    value === undefined ||
+    value === null ||
+    (typeof value !== 'object' && typeof value !== 'function')
+  )
 }
 
 export const isFunction = (value: any): value is Function => {
@@ -36,6 +50,18 @@ export const isNumber = (value: any): value is number => {
 
 export const isDate = (value: any): value is Date => {
   return Object.prototype.toString.call(value) === '[object Date]'
+}
+
+/**
+ * This is really a _best guess_ promise checking. You
+ * should probably use Promise.resolve(value) to be 100%
+ * sure you're handling it correctly.
+ */
+export const isPromise = (value: any): value is Promise<any> => {
+  if (!value) return false
+  if (!value.then) return false
+  if (!isFunction(value.then)) return false
+  return true
 }
 
 export const isEmpty = (value: any) => {

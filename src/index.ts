@@ -24,10 +24,15 @@ export {
   sift,
   sort,
   sum,
-  unique
+  toggle,
+  unique,
+  zip,
+  zipToObject
 } from './array'
 export {
+  all,
   defer,
+  guard,
   map,
   parallel,
   reduce,
@@ -38,6 +43,7 @@ export {
 } from './async'
 export type { AggregateError } from './async'
 export {
+  callable,
   chain,
   compose,
   debounce,
@@ -47,11 +53,15 @@ export {
   proxied,
   throttle
 } from './curry'
-export { toFloat, toInt } from './number'
+export { inRange, toFloat, toInt } from './number'
 export {
+  assign,
   clone,
+  construct,
+  crush,
   get,
   invert,
+  keys,
   listify,
   lowerize,
   mapEntries,
@@ -59,26 +69,21 @@ export {
   mapValues,
   omit,
   pick,
+  set,
   shake,
-  upperize,
-  zip
+  upperize
 } from './object'
 export { draw, random, shuffle, uid } from './random'
 export { series } from './series'
 export {
-  /**
-   * Warning: This is exported for compatability
-   * but is @deprecated and will be removed in
-   * the next major version. Someone spelled
-   * camel wrong when it was implemented...
-   */
-  camel as camal,
   camel,
   capitalize,
   dash,
   pascal,
   snake,
-  template
+  template,
+  title,
+  trim
 } from './string'
 export {
   isArray,
@@ -90,6 +95,8 @@ export {
   isInt,
   isNumber,
   isObject,
+  isPrimitive,
+  isPromise,
   isString,
   isSymbol
 } from './typed'
